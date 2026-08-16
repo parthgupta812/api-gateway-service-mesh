@@ -1,0 +1,163 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  user-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BINARY_PATH: cmd/user-service
+    container_name: user-service
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  order-service-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BINARY_PATH: cmd/order-service
+    container_name: order-service-1
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9002/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  order-service-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BINARY_PATH: cmd/order-service
+    container_name: order-service-2
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9002/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  order-service-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BINARY_PATH: cmd/order-service
+    container_name: order-service-3
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9002/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  product-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BINARY_PATH: cmd/product-service
+    container_name: product-service
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9003/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BINARY_PATH: cmd/gateway
+    container_name: gateway
+    ports:
+      - "8081:8080"
+    environment:
+      - GATEWAY_PORT=8080
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - USER_SERVICE_URL=http://user-service:9001
+      - ORDER_SERVICE_URL=http://order-service-1:9002,http://order-service-2:9002,http://order-service-3:9002
+      - PRODUCT_SERVICE_URL=http://product-service:9003
+      - RATE_LIMIT_REQUESTS=100
+      - RATE_LIMIT_WINDOW_SECONDS=60
+      - HEALTH_CHECK_INTERVAL_SECONDS=5
+      - HEALTH_CHECK_TIMEOUT_SECONDS=2
+      - HEALTH_CHECK_PATH=/health
+      - CIRCUIT_BREAKER_FAILURE_THRESHOLD=3
+      - CIRCUIT_BREAKER_RECOVERY_TIMEOUT_SECONDS=15
+    depends_on:
+      redis:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      order-service-1:
+        condition: service_healthy
+      order-service-2:
+        condition: service_healthy
+      order-service-3:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: prometheus
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9090/-/healthy"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
