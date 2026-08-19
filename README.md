@@ -15,7 +15,7 @@ It provides:
 - A React dashboard with live topology, traffic analytics, and an API request playground
 - Service health monitoring across all backends
 
-## Architecture
+## Architecture & Service Topology
 
 ```
 Client
@@ -39,6 +39,10 @@ React Dashboard ──▶ API Gateway   (topology, metrics, recent traffic)
 
 The gateway tracks backend instances in a lightweight per-service registry. A background health checker probes each instance's `/health` endpoint and excludes unhealthy ones from routing. Each instance also has its own circuit breaker (`CLOSED → OPEN → HALF-OPEN`) that trips independently on repeated upstream failures.
 
+![Service Topology](screenshots/topology.png)
+
+The topology view visualizes the gateway, its backend services, the individual order-service instances (order-service-1/2/3), and their live health and routing state.
+
 ## Features
 
 | Feature | Implementation |
@@ -54,6 +58,10 @@ The gateway tracks backend instances in a lightweight per-service registry. A ba
 | Containerization | Docker Compose |
 
 ## Dashboard
+
+![API Gateway Dashboard](screenshots/dashboard.png)
+
+The dashboard provides a high-level view of gateway health, traffic, latency, service status, and overall system activity at a glance.
 
 A multi-page React dashboard (client-side routed, no full page reloads) served at **http://localhost:8090**:
 
@@ -71,7 +79,11 @@ A multi-page React dashboard (client-side routed, no full page reloads) served a
 
 All numbers shown are backed by real data — Prometheus metrics or the gateway's own read-only introspection endpoints (`/gateway/topology`, `/gateway/recent-requests`). Where a metric has no data yet, the dashboard shows `N/A` rather than a fabricated value.
 
-The **API Playground** sends actual `GET`/`POST`/`PUT`/`DELETE` requests through the gateway (not simulated) and displays the real HTTP status, response time, upstream instance that served the request, response headers, and formatted JSON body.
+### API Playground
+
+![API Playground](screenshots/api-playground.png)
+
+The **API Playground** is an interactive feature of the running application — not a mock. It sends actual `GET`/`POST`/`PUT`/`DELETE` requests through the gateway and displays the real HTTP status, response time, upstream instance that served the request, response headers, and formatted JSON body.
 
 ## 5-minute demo
 
@@ -160,15 +172,13 @@ Dockerfile             shared multi-stage build for all Go binaries
 - **Observability:** Prometheus, Grafana
 - **Infrastructure:** Docker, Docker Compose, nginx (dashboard static serving + reverse proxy)
 
+## Traffic & Observability
+
+![Traffic Analytics](screenshots/traffic1.png)
+![Traffic Analytics](screenshots/traffic2.png)
+
+The traffic views expose live gateway request activity: request rate, latency (P50/P95), status code distribution, and per-service/upstream traffic breakdowns — all backed by real Prometheus data and the gateway's own metrics.
+
 ## Limitations / scope
 
 This is a learning and portfolio project exploring API gateway and service-mesh patterns (routing, load balancing, health checking, circuit breaking, rate limiting, observability) in a self-contained Go codebase. It is not a replacement for production-grade gateways or service meshes such as Envoy, NGINX, Kong, or Istio, and does not implement authentication, multi-region routing, mTLS, or distributed tracing.
-
-## Screenshots
-
-_Add screenshots to a `docs/screenshots/` directory and reference them below._
-
-- Dashboard overview — `docs/screenshots/dashboard-overview.png`
-- Service topology — `docs/screenshots/topology.png`
-- API Playground — `docs/screenshots/playground.png`
-- Traffic analytics — `docs/screenshots/traffic.png`
