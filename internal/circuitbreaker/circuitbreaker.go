@@ -58,6 +58,7 @@ type Breaker struct {
 	consecutiveFails int
 	openedAt         time.Time
 	probeInFlight    bool
+	lastStateChange  time.Time
 }
 
 // New creates a Breaker with the given options, starting in the CLOSED
@@ -69,7 +70,22 @@ func New(opts Options) *Breaker {
 	if opts.RecoveryTimeout <= 0 {
 		opts.RecoveryTimeout = 30 * time.Second
 	}
-	return &Breaker{opts: opts, state: Closed}
+	return &Breaker{opts: opts, state: Closed, lastStateChange: time.Now()}
+}
+
+// Failures returns the current consecutive failure count. It is reset when
+// a request succeeds or the breaker closes.
+func (b *Breaker) Failures() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.consecutiveFails
+}
+
+// LastStateChange returns the time of the most recent state transition.
+func (b *Breaker) LastStateChange() time.Time {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.lastStateChange
 }
 
 // State returns the breaker's current state, resolving an elapsed OPEN
@@ -88,6 +104,7 @@ func (b *Breaker) maybeTransitionToHalfOpen() {
 	if b.state == Open && time.Since(b.openedAt) >= b.opts.RecoveryTimeout {
 		b.state = HalfOpen
 		b.probeInFlight = false
+		b.lastStateChange = time.Now()
 	}
 }
 
@@ -127,6 +144,7 @@ func (b *Breaker) RecordSuccess() {
 		b.state = Closed
 		b.consecutiveFails = 0
 		b.probeInFlight = false
+		b.lastStateChange = time.Now()
 	case Closed:
 		b.consecutiveFails = 0
 	}
@@ -142,16 +160,20 @@ func (b *Breaker) RecordFailure() {
 
 	switch b.state {
 	case HalfOpen:
+		// A failed probe sends the breaker straight back to OPEN. The
+		// failure count is retained (not reset) so operators can see how
+		// many failures this instance has accumulated.
+		b.consecutiveFails++
 		b.state = Open
 		b.openedAt = time.Now()
 		b.probeInFlight = false
-		b.consecutiveFails = 0
+		b.lastStateChange = time.Now()
 	case Closed:
 		b.consecutiveFails++
 		if b.consecutiveFails >= b.opts.FailureThreshold {
 			b.state = Open
 			b.openedAt = time.Now()
-			b.consecutiveFails = 0
+			b.lastStateChange = time.Now()
 		}
 	}
 }

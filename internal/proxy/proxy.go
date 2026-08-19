@@ -114,6 +114,14 @@ func NewLoadBalancedProxy(reg *registry.Registry, prefix, serviceName string, lo
 				w.WriteHeader(http.StatusBadGateway)
 				_, _ = w.Write([]byte(`{"error":"upstream service unavailable"}`))
 			},
+			// ModifyResponse attaches which instance actually served the
+			// request as a response header. This is read-only
+			// observability (e.g. for the dashboard's API Playground) and
+			// does not affect routing, balancing, or the response body.
+			ModifyResponse: func(resp *http.Response) error {
+				resp.Header.Set("X-Upstream-Instance", instance.Addr)
+				return nil
+			},
 		}
 
 		reverseProxy.ServeHTTP(c.Writer, c.Request)
@@ -124,11 +132,11 @@ func NewLoadBalancedProxy(reg *registry.Registry, prefix, serviceName string, lo
 
 		if upstreamFailed {
 			instance.Breaker.RecordFailure()
-			metrics.UpstreamRequestsTotal.WithLabelValues(serviceName, "failure").Inc()
-			metrics.UpstreamFailuresTotal.WithLabelValues(serviceName).Inc()
+			metrics.UpstreamRequestsTotal.WithLabelValues(serviceName, instance.Addr, "failure").Inc()
+			metrics.UpstreamFailuresTotal.WithLabelValues(serviceName, instance.Addr).Inc()
 		} else {
 			instance.Breaker.RecordSuccess()
-			metrics.UpstreamRequestsTotal.WithLabelValues(serviceName, "success").Inc()
+			metrics.UpstreamRequestsTotal.WithLabelValues(serviceName, instance.Addr, "success").Inc()
 		}
 
 		metrics.CircuitBreakerState.WithLabelValues(serviceName, instance.Addr).Set(

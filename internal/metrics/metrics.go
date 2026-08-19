@@ -42,23 +42,27 @@ var (
 	)
 
 	// UpstreamRequestsTotal counts requests forwarded to upstream backend
-	// services, by logical service name and outcome.
+	// services, by logical service name, target instance and outcome.
+	//
+	// The per-instance label is named "upstream" rather than "instance"
+	// because Prometheus reserves "instance" for the scrape target and
+	// would otherwise rewrite it to "exported_instance".
 	UpstreamRequestsTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "gateway_upstream_requests_total",
 			Help: "Total number of requests forwarded to upstream services.",
 		},
-		[]string{"service", "outcome"},
+		[]string{"service", "upstream", "outcome"},
 	)
 
 	// UpstreamFailuresTotal counts failed upstream requests (transport
-	// errors or 5xx responses), by logical service name.
+	// errors or 5xx responses), by logical service name and instance.
 	UpstreamFailuresTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "gateway_upstream_failures_total",
 			Help: "Total number of failed upstream requests.",
 		},
-		[]string{"service"},
+		[]string{"service", "upstream"},
 	)
 
 	// RateLimitedRequestsTotal counts requests rejected by the rate
@@ -78,7 +82,7 @@ var (
 			Name: "gateway_circuit_breaker_state",
 			Help: "Current circuit breaker state per service (0=closed, 1=half_open, 2=open).",
 		},
-		[]string{"service", "instance"},
+		[]string{"service", "upstream"},
 	)
 
 	// CircuitBreakerRejectionsTotal counts requests rejected because the

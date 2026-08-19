@@ -49,19 +49,93 @@ across 4 completed milestones, now starting a 5th (frontend dashboard).
 - Results documented in `QA_RESULTS.md` (real measured numbers, no
   invented data)
 
-**Milestone 5 — Frontend dashboard (in progress)**
-- Goal: React + Vite dashboard styled as a light-theme "cloud/network
-  infrastructure console" (explicitly distinct from a separate dark-theme
-  "TaskFlow" project), visualizing the gateway's service topology, live
-  Prometheus metrics, rate limiting, circuit breaker states, and traffic
-  distribution.
-- Must not modify backend architecture. Small read-only integration
-  endpoints are allowed if genuinely needed, but avoid changing existing
-  behavior.
-- Added to Docker Compose as a new service; full stack still starts with
-  `docker compose up -d --build`.
-- See "Frontend dashboard details" section below once implemented — update
-  this file as that work progresses.
+**Milestone 5 — Frontend dashboard (complete)**
+- React 18 + Vite 7 + TypeScript dashboard at `frontend/`, served by nginx
+  in its own container on host port **8090**.
+- Light-theme "cloud infrastructure console" aesthetic: white cards, blue
+  accent, soft shadows, service topology as the centerpiece. Deliberately
+  distinct from the dark-theme TaskFlow project.
+- Panels: header (status/uptime/refresh/time-range), 5 KPI cards with
+  sparklines, service topology, rate limiting gauge, P95 latency chart,
+  backend services table, circuit breaker table, order-service traffic
+  distribution donut, recent traffic, top endpoints, quick links.
+- All charts are hand-rolled SVG (no chart library) to keep dependencies
+  minimal. Zero npm vulnerabilities.
+- nginx reverse-proxies `/api/prom/*` -> prometheus:9090 and `/api/gw/*` ->
+  gateway:8080, so the browser makes only same-origin requests (no CORS,
+  no direct browser access to backends needed).
+- Auto-refreshes (default 5s, configurable/off) so generated traffic is
+  visibly reflected.
+- Never fabricates data: missing series render as "N/A". The only
+  exception is counters that have never been incremented (5xx numerator,
+  rate-limited total), where `or vector(0)` is used because "no series"
+  genuinely means "zero occurrences" — the denominator is left bare so a
+  gateway with no traffic still shows N/A rather than a fake 0%.
+
+Minimal read-only backend additions made for the dashboard (no behavior
+change to routing/balancing/limiting/breaking):
+- `GET /gateway/topology` — live registry state: per-instance health,
+  circuit breaker state/failures/last-state-change, effective config,
+  uptime. Needed because Prometheus series for an instance only exist
+  after it has served traffic, so health could not be shown reliably.
+- `GET /gateway/recent-requests?limit=N` (default 25, buffer capacity 200)
+  — recent proxied API requests, from a bounded in-memory ring buffer
+  (`internal/telemetry`). This is the only possible source for the
+  recent-traffic view; gateway logs go to stdout and are not reachable
+  from a browser. Only `/api/*` requests are recorded. Each entry now also
+  includes `responseSize` (bytes written, from `c.Writer.Size()`).
+- `internal/circuitbreaker`: added `Failures()` and `LastStateChange()`
+  accessors, and the consecutive-failure count is no longer zeroed when
+  the breaker trips (so the table can show a meaningful failure count).
+  Threshold logic is unchanged — the counter still only increments while
+  CLOSED and still resets on success/close.
+- `internal/metrics`: `gateway_upstream_requests_total` and
+  `gateway_upstream_failures_total` gained a per-instance label, and the
+  circuit-breaker gauge's `instance` label was renamed. The label is
+  called **`upstream`**, not `instance`, because Prometheus reserves
+  `instance` for the scrape target and would rewrite it to
+  `exported_instance`. This enables real per-instance traffic
+  distribution. Grafana dashboard legend updated to match.
+- `internal/proxy`: the load-balanced proxy now sets an
+  `X-Upstream-Instance` response header (via `httputil.ReverseProxy`'s
+  `ModifyResponse`) identifying which backend instance actually served
+  each request. Read-only; does not affect the response body or routing.
+  Used by the API Playground to show "upstream: order-service-2" etc.
+
+**Milestone 6 — Multi-page frontend routing (complete)**
+- Refactored the single-page scroll dashboard into a proper multi-page app
+  using `react-router-dom` v7 (client-side routing, no full page reloads).
+- Added `context/DashboardContext.tsx`: a single shared polling loop
+  (previously local to `App.tsx`) so every page reads the same live data
+  without restarting fetches on navigation.
+- Routes: `/` (compact overview), `/topology`, `/traffic`, `/services`,
+  `/circuit-breakers`, `/rate-limiting`, `/endpoints`, `/playground`,
+  `/recent-traffic`. Unknown paths fall back to `/`.
+- `components/Layout.tsx` renders the persistent sidebar (`NavLink`-based,
+  active route highlighted) + `<Outlet/>`. `components/Page.tsx` is the
+  shared per-page shell (route-specific `PageHeader` + error banner).
+- New: **API Playground** (`pages/PlaygroundPage.tsx`) — sends real
+  `fetch()` calls through the same `/api/gw/*` nginx proxy the rest of the
+  app uses, i.e. genuinely through the running gateway. Supports
+  GET/POST/PUT/DELETE, custom headers, JSON body editor with validation,
+  and displays status/duration/upstream (from `X-Upstream-Instance`)
+  /response headers/formatted JSON body. Nothing is mocked.
+- New: **Endpoints page** (`lib/endpoints.ts` static catalog + live
+  Prometheus stats per route) with a "Test" button that navigates to
+  `/playground?method=X&path=Y` pre-filled.
+- New: **Recent Traffic page** — fetches up to 200 requests directly
+  (`?limit=200`) and filters client-side by status class, method, and
+  route substring search.
+- Traffic page gained P50 alongside P95, 2xx/4xx/5xx rate-over-time
+  chart (`components/charts/MultiAreaChart.tsx`), and absolute status-class
+  totals — all via `or vector(0)` Prometheus queries so a healthy gateway
+  with zero errors shows "0", not "N/A" (N/A is reserved for genuinely
+  unreachable data sources).
+- Existing single-page components (`Topology`, `RateLimitPanel` logic,
+  `CircuitBreakerTable`, `BackendServicesTable`, `TrafficDistribution`,
+  `RecentTraffic`, `TopEndpoints`, `QuickLinks`, all chart primitives) were
+  reused as-is across the new pages, not rewritten — only their scroll-anchor
+  `id` attributes were removed since navigation is now route-based.
 
 ## Current architecture
 
@@ -101,6 +175,16 @@ monitoring/
   prometheus/prometheus.yml                    - scrape config (targets gateway:8080/metrics)
   grafana/provisioning/datasources/            - Prometheus datasource (auto-provisioned)
   grafana/provisioning/dashboards/json/        - "API Gateway Overview" dashboard (auto-provisioned)
+  telemetry/       - bounded ring buffer of recent proxied requests (read-only)
+frontend/          - React + Vite + TS dashboard (nginx-served, port 8090)
+  src/lib/         - prometheus.ts (PromQL client), gateway.ts (topology/recent), format.ts
+  src/hooks/       - useDashboardData.ts (all queries + polling)
+  src/components/  - Sidebar, Header, KpiCards, Topology, RateLimitPanel,
+                     LatencyPanel, BackendServicesTable, CircuitBreakerTable,
+                     TrafficDistribution, RecentTraffic, TopEndpoints,
+                     QuickLinks, Icons, charts/{Sparkline,AreaChart,Donut,Gauge}
+  nginx.conf       - static serving + /api/prom and /api/gw reverse proxies
+  Dockerfile       - node:22-alpine build -> nginx:1.27-alpine serve
 scripts/
   loadtest/main.go  - standalone QA load generator, not part of gateway runtime
 Dockerfile           - shared multi-stage build for all 4 Go binaries (BINARY_PATH arg)
@@ -126,7 +210,17 @@ README.md            - minimal run instructions
 - `GET /health` — gateway + Redis health
 - `GET /metrics` — Prometheus exposition format
 - `GET /api/users/*`, `GET /api/orders/*`, `GET /api/products/*` — proxied,
-  load-balanced, rate-limited, circuit-breaker-protected
+  load-balanced, rate-limited, circuit-breaker-protected. Responses now
+  include an `X-Upstream-Instance` header identifying the serving instance.
+- `GET /gateway/topology` — read-only live registry/breaker state (dashboard)
+- `GET /gateway/recent-requests?limit=N` — read-only recent proxied requests,
+  default limit 25, buffer capacity 200 (dashboard)
+
+## Frontend routes
+
+`/`, `/topology`, `/traffic`, `/services`, `/circuit-breakers`,
+`/rate-limiting`, `/endpoints`, `/playground`, `/recent-traffic`. See
+Milestone 6 above for what each page shows.
 
 ## Explicit restrictions carried across all milestones
 
@@ -171,10 +265,14 @@ docker compose up -d --build
 ```
 
 Then:
+- **Dashboard: http://localhost:8090**
 - Gateway: http://localhost:8081
 - Prometheus: http://localhost:9090
 - Grafana: http://localhost:3000 (admin/admin)
 - Redis: localhost:6379
+
+Frontend local dev (against a running stack): `cd frontend && npm install
+&& npm run dev` (Vite dev server proxies to localhost:9090 / localhost:8081).
 
 ## Update this file
 

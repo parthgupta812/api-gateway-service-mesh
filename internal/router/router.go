@@ -18,16 +18,21 @@ import (
 	"apigateway/internal/proxy"
 	"apigateway/internal/ratelimit"
 	"apigateway/internal/registry"
+	"apigateway/internal/telemetry"
 )
 
 // New builds the fully configured Gin engine for the gateway, along with
 // the service registries it created (so callers, e.g. main, can start
 // background health checking against them).
 func New(ctx context.Context, cfg *config.Config, redisClient *redis.Client, logger *slog.Logger) (*gin.Engine, map[string]*registry.Registry, error) {
+	startedAt := time.Now()
+	recent := telemetry.NewRecentRequests(200)
+
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 	engine.Use(middleware.RequestLogger(logger))
 	engine.Use(middleware.Metrics())
+	engine.Use(middleware.RecentRequests(recent))
 
 	limiter := ratelimit.New(redisClient, cfg.RateLimitRequests, cfg.RateLimitWindow)
 	engine.Use(middleware.RateLimit(limiter))
@@ -57,6 +62,12 @@ func New(ctx context.Context, cfg *config.Config, redisClient *redis.Client, log
 		engine.Any(prefix, handler)
 		engine.Any(prefix+"/*proxyPath", handler)
 	}
+
+	// Read-only introspection endpoints consumed by the dashboard. These
+	// only report existing internal state and do not alter gateway
+	// behavior.
+	engine.GET("/gateway/topology", topologyHandler(cfg, registries, redisClient, startedAt))
+	engine.GET("/gateway/recent-requests", recentRequestsHandler(recent))
 
 	healthcheck.Run(ctx, registries, healthcheck.Options{
 		Interval: cfg.HealthCheckInterval,

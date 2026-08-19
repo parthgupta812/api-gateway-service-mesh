@@ -141,6 +141,27 @@ services:
       retries: 5
     restart: unless-stopped
 
+  dashboard:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: dashboard
+    ports:
+      - "8090:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      # 127.0.0.1 rather than localhost: nginx listens on IPv4 only, and
+      # "localhost" resolves to ::1 first inside the container.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   grafana:
     image: grafana/grafana:11.2.0
     container_name: grafana

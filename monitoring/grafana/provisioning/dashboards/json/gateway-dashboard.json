@@ -92,7 +92,7 @@
       "targets": [
         {
           "expr": "gateway_circuit_breaker_state",
-          "legendFormat": "{{service}} - {{instance}}"
+          "legendFormat": "{{service}} - {{upstream}}"
         }
       ]
     },

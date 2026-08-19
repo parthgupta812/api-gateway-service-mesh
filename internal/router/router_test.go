@@ -337,3 +337,151 @@ func TestRouter_CircuitBreakerOpensAndRecoversEndToEnd(t *testing.T) {
 		t.Fatal("expected previously-failing instance to rejoin rotation after recovering")
 	}
 }
+
+func TestRouter_TopologyEndpointReportsRealState(t *testing.T) {
+	userSrv := fakeBackend(t, "user-service")
+	productSrv := fakeBackend(t, "product-service")
+	order1 := fakeBackend(t, "order-1")
+	order2 := fakeBackend(t, "order-2")
+
+	orderURLs := fmt.Sprintf("%s,%s", order1.URL, order2.URL)
+	cfg := baseTestConfig(userSrv.URL, orderURLs, productSrv.URL)
+	redisClient := newTestRedis(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	engine, registries, err := New(ctx, cfg, redisClient, testLogger())
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	gatewayServer := httptest.NewServer(engine)
+	defer gatewayServer.Close()
+
+	// Mark one order instance unhealthy so we can assert it is reported.
+	for _, inst := range registries["order"].Instances() {
+		if inst.Addr == order2.URL {
+			inst.SetHealthy(false)
+		}
+	}
+
+	resp, err := http.Get(gatewayServer.URL + "/gateway/topology")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var body topologyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode topology response: %v", err)
+	}
+
+	if len(body.Services) != 3 {
+		t.Fatalf("expected 3 services, got %d", len(body.Services))
+	}
+
+	var orderView *serviceView
+	for i := range body.Services {
+		if body.Services[i].Key == "order" {
+			orderView = &body.Services[i]
+		}
+	}
+	if orderView == nil {
+		t.Fatal("order service missing from topology response")
+	}
+	if orderView.Total != 2 {
+		t.Errorf("expected 2 order instances, got %d", orderView.Total)
+	}
+	if orderView.Healthy != 1 {
+		t.Errorf("expected 1 healthy order instance, got %d", orderView.Healthy)
+	}
+
+	for _, inst := range orderView.Instances {
+		if inst.CircuitState != "closed" {
+			t.Errorf("instance %s: expected closed breaker, got %q", inst.Addr, inst.CircuitState)
+		}
+		if inst.Name == "" {
+			t.Errorf("instance %s: expected a display name", inst.Addr)
+		}
+	}
+
+	if body.Config.RateLimitRequests != cfg.RateLimitRequests {
+		t.Errorf("expected rate limit %d in config, got %d", cfg.RateLimitRequests, body.Config.RateLimitRequests)
+	}
+	if body.Status == "" {
+		t.Error("expected a non-empty status")
+	}
+}
+
+func TestRouter_RecentRequestsEndpointRecordsProxiedTraffic(t *testing.T) {
+	userSrv := fakeBackend(t, "user-service")
+	orderSrv := fakeBackend(t, "order-service")
+	productSrv := fakeBackend(t, "product-service")
+
+	cfg := baseTestConfig(userSrv.URL, orderSrv.URL, productSrv.URL)
+	redisClient := newTestRedis(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	engine, _, err := New(ctx, cfg, redisClient, testLogger())
+	if err != nil {
+		t.Fatalf("New returned error: %v", err)
+	}
+
+	gatewayServer := httptest.NewServer(engine)
+	defer gatewayServer.Close()
+
+	// Generate proxied traffic plus a gateway-local request.
+	for i := 0; i < 3; i++ {
+		resp, err := http.Get(gatewayServer.URL + "/api/users")
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i, err)
+		}
+		resp.Body.Close()
+	}
+	healthResp, err := http.Get(gatewayServer.URL + "/health")
+	if err != nil {
+		t.Fatalf("health request failed: %v", err)
+	}
+	healthResp.Body.Close()
+
+	resp, err := http.Get(gatewayServer.URL + "/gateway/recent-requests")
+	if err != nil {
+		t.Fatalf("recent-requests failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Requests []struct {
+			Method   string `json:"method"`
+			Route    string `json:"route"`
+			Status   int    `json:"status"`
+			Upstream string `json:"upstream"`
+		} `json:"requests"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("failed to decode recent-requests: %v", err)
+	}
+
+	if len(body.Requests) != 3 {
+		t.Fatalf("expected exactly 3 recorded /api requests (gateway-local routes excluded), got %d", len(body.Requests))
+	}
+
+	for _, r := range body.Requests {
+		if r.Route != "/api/users" {
+			t.Errorf("expected route /api/users, got %q", r.Route)
+		}
+		if r.Status != http.StatusOK {
+			t.Errorf("expected status 200, got %d", r.Status)
+		}
+		if r.Upstream != userSrv.URL {
+			t.Errorf("expected upstream %s, got %q", userSrv.URL, r.Upstream)
+		}
+	}
+}
