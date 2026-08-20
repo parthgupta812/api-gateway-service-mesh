@@ -4,10 +4,15 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+# COPY source paths below are relative to the BUILD CONTEXT, not to this
+# Dockerfile's own directory (standard Docker behavior when -f points at
+# a Dockerfile outside the context root). Render builds this image with
+# build context = repo root and Dockerfile path = frontend/Dockerfile,
+# so the paths must be repo-root-relative.
+COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
 
-COPY . .
+COPY frontend/. .
 RUN npm run build
 
 # ---- serve stage ----
@@ -25,7 +30,7 @@ FROM nginx:1.27-alpine
 ENV GATEWAY_UPSTREAM=http://gateway:8080
 ENV PROMETHEUS_UPSTREAM=http://prometheus:9090
 
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=builder /app/dist /usr/share/nginx/html
 
 EXPOSE 80

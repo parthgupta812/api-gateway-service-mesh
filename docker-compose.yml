@@ -143,8 +143,12 @@ services:
 
   dashboard:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      # context/dockerfile match Render's build settings (repo root context,
+      # frontend/Dockerfile path) so the same Dockerfile works in both
+      # places -- same pattern already used by the other services below
+      # (context: ., dockerfile: Dockerfile with a subdirectory build arg).
+      context: .
+      dockerfile: frontend/Dockerfile
     container_name: dashboard
     ports:
       - "8090:80"

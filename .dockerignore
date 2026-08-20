@@ -1,0 +1,8 @@
+# Applies to builds using the repo root as build context (e.g. Render's
+# frontend/Dockerfile and monitoring/prometheus/Dockerfile configurations).
+# frontend/.dockerignore covers the same paths for local builds that use
+# ./frontend as their context (docker-compose.yml's dashboard service).
+frontend/node_modules
+frontend/dist
+frontend/.vite
+**/*.log
