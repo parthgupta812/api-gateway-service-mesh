@@ -12,8 +12,13 @@
 
 FROM prom/prometheus:v2.55.1
 
-COPY prometheus.yml.template /etc/prometheus/prometheus.yml.template
-COPY docker-entrypoint.sh /docker-entrypoint.sh
+# COPY source paths below are relative to the BUILD CONTEXT, not to this
+# Dockerfile's own directory (standard Docker behavior when -f points at
+# a Dockerfile outside the context root). Render builds this image with
+# build context = repo root and Dockerfile path =
+# monitoring/prometheus/Dockerfile, so the paths must be repo-root-relative.
+COPY monitoring/prometheus/prometheus.yml.template /etc/prometheus/prometheus.yml.template
+COPY monitoring/prometheus/docker-entrypoint.sh /docker-entrypoint.sh
 
 # prom/prometheus's base image runs as an unprivileged "nobody" user by
 # default; the copied files must be readable/executable by it.
