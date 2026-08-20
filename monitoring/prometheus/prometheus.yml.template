@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "gateway"
+    scheme: ${GATEWAY_SCRAPE_SCHEME}
+    static_configs:
+      - targets: ["${GATEWAY_SCRAPE_TARGET}"]

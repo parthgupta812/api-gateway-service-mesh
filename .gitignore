@@ -1,8 +1,6 @@
-@"
 .env
 .env.*
 !.env.example
 node_modules/
 dist/
 *.exe
-"@ | Out-File -Encoding utf8 .gitignore

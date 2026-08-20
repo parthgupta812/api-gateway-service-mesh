@@ -1344,6 +1344,17 @@ input {
   border-color: var(--slate-200);
 }
 
+.link-list-disabled {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--slate-200);
+  opacity: 0.65;
+  cursor: default;
+}
+
 .link-icon {
   display: grid;
   place-items: center;

@@ -179,6 +179,28 @@ Dockerfile             shared multi-stage build for all Go binaries
 
 The traffic views expose live gateway request activity: request rate, latency (P50/P95), status code distribution, and per-service/upstream traffic breakdowns — all backed by real Prometheus data and the gateway's own metrics.
 
+## Public Deployment
+
+The full stack described above — including **Grafana** — is what you get from `docker compose up -d --build` locally. Grafana ships with a default `admin/admin` login intended for local use only, so it is **not** part of the public deployment target and remains local-only.
+
+For a $0 public deployment (e.g. Render free web services + a free Redis-compatible key-value store), the same codebase supports an equivalent architecture without any redesign:
+
+```
+Public:  Dashboard → API Gateway → User / Order×3 / Product services → Redis
+                            ↓
+                       Prometheus → (queried by the Dashboard)
+
+Local only: Grafana (via docker compose)
+```
+
+- The dashboard's nginx layer proxies `/api/gw/*` and `/api/prom/*` to configurable upstreams (`GATEWAY_UPSTREAM`, `PROMETHEUS_UPSTREAM` env vars, rendered into the nginx config at container startup), so the frontend code never needs to know whether it's talking to `gateway:8080` or a public HTTPS host.
+- Quick Links (Gateway, Prometheus, Grafana) resolve from `VITE_GATEWAY_PUBLIC_URL` / `VITE_PROMETHEUS_PUBLIC_URL` build-time variables when set, falling back to the local same-host-different-port behavior otherwise. Grafana shows as a clearly labeled "local only" entry unless a public Grafana URL is explicitly configured (it isn't, by design).
+- Prometheus has a separate deployable image (`monitoring/prometheus/Dockerfile`) that renders its scrape target from `GATEWAY_SCRAPE_TARGET` / `GATEWAY_SCRAPE_SCHEME` env vars, since Render can't use the local bind-mounted `prometheus.yml`.
+- All gateway backend URLs (`USER_SERVICE_URL`, `ORDER_SERVICE_URL`, `PRODUCT_SERVICE_URL`, `REDIS_HOST`/`REDIS_PORT`) are already environment-driven — see `.env.example` for the full list and public-deployment guidance (no real URLs are committed).
+- Free-tier services on Render sleep when idle and cold-start on the next request, which can take up to ~60 seconds. The gateway's existing health-check and circuit-breaker timeouts are tunable via env vars to tolerate this without any code changes.
+
+This public deployment target is a demo/portfolio configuration, not a production-scale one — see Limitations below.
+
 ## Limitations / scope
 
 This is a learning and portfolio project exploring API gateway and service-mesh patterns (routing, load balancing, health checking, circuit breaking, rate limiting, observability) in a self-contained Go codebase. It is not a replacement for production-grade gateways or service meshes such as Envoy, NGINX, Kong, or Istio, and does not implement authentication, multi-region routing, mTLS, or distributed tracing.

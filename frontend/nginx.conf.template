@@ -1,3 +1,20 @@
+# nginx config template, rendered by the official nginx image's built-in
+# envsubst-on-startup mechanism (docker-entrypoint.d/20-envsubst-on-templates.sh).
+# Any file placed in /etc/nginx/templates/*.template is written to
+# /etc/nginx/conf.d/*.conf with ${VAR} placeholders substituted from the
+# container's environment at startup -- no extra tooling required, and no
+# rebuild needed to point at a different upstream.
+#
+# GATEWAY_UPSTREAM / PROMETHEUS_UPSTREAM hold a full scheme+host, e.g.:
+#   local:  http://gateway:8080        http://prometheus:9090
+#   public: https://<gateway-host>     https://<prometheus-host>
+#
+# Because envsubst runs before nginx parses this file, proxy_pass below
+# always sees a plain literal URL (exactly as it did before templating
+# was introduced) -- nginx resolves it once at config load using the
+# container's normal DNS, so no extra resolver configuration is needed
+# either locally (Docker Compose's embedded DNS) or on Render (public DNS).
+
 server {
     listen       80;
     server_name  _;
@@ -12,7 +29,8 @@ server {
     # CORS entirely and means the browser never needs direct access to the
     # metrics backends.
     location /api/prom/ {
-        proxy_pass         http://prometheus:9090/;
+        proxy_pass         ${PROMETHEUS_UPSTREAM}/;
+        proxy_ssl_server_name on;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
@@ -23,7 +41,8 @@ server {
 
     # Reverse proxy to the gateway's read-only introspection endpoints.
     location /api/gw/ {
-        proxy_pass         http://gateway:8080/;
+        proxy_pass         ${GATEWAY_UPSTREAM}/;
+        proxy_ssl_server_name on;
         proxy_http_version 1.1;
         proxy_set_header   Host              $host;
         proxy_set_header   X-Real-IP         $remote_addr;
