@@ -49,6 +49,7 @@ export type DashboardData = {
 
   // Per-service / per-instance breakdowns
   serviceRps: Sample[]
+  serviceTotals: Sample[]
   routeAvgLatency: Sample[]
   routeRps: Sample[]
   orderInstanceRps: Sample[]
@@ -90,6 +91,7 @@ const EMPTY: DashboardData = {
   count429: null,
   p50Seconds: null,
   serviceRps: [],
+  serviceTotals: [],
   routeAvgLatency: [],
   routeRps: [],
   orderInstanceRps: [],
@@ -128,6 +130,7 @@ export function useDashboardData(range: TimeRange, refreshMs: number) {
         uptimeSeconds,
         prometheusUp,
         serviceRps,
+        serviceTotals,
         routeAvgLatency,
         routeRps,
         orderInstanceRps,
@@ -174,6 +177,11 @@ export function useDashboardData(range: TimeRange, refreshMs: number) {
         queryScalar('time() - process_start_time_seconds{job="gateway"}', signal),
         queryTargetUp(signal),
         queryVector(`sum by (service) (rate(gateway_upstream_requests_total[${w}]))`, signal),
+        // Cumulative (non-rate) per-service totals, across all services --
+        // this is what Traffic Distribution shows. Distinct from
+        // orderInstanceTotals below, which is order-service-only and
+        // broken down by upstream instance instead of by service.
+        queryVector('sum by (service) (gateway_upstream_requests_total)', signal),
         queryVector(
           `sum by (route) (rate(gateway_http_request_duration_seconds_sum[${w}])) ` +
             `/ sum by (route) (rate(gateway_http_request_duration_seconds_count[${w}]))`,
@@ -271,6 +279,7 @@ export function useDashboardData(range: TimeRange, refreshMs: number) {
         count5xx,
         count429,
         serviceRps,
+        serviceTotals,
         routeAvgLatency,
         routeRps,
         orderInstanceRps,

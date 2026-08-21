@@ -1,18 +1,22 @@
 import type { DashboardData } from '../hooks/useDashboardData'
-import { NA, fmtCompact, upstreamName } from '../lib/format'
+import { NA, fmtCompact } from '../lib/format'
 import { Donut, type DonutSlice } from './charts/Donut'
 
 const COLORS = ['#2563eb', '#f59e0b', '#10b981', '#8b5cf6', '#ef4444']
 
 /**
- * Order-service traffic distribution, proving load balancing is actually
- * spreading requests. Values come from the per-instance upstream counter
- * (gateway_upstream_requests_total{service="order"}).
+ * Aggregate traffic distribution across all configured backend services
+ * (User, Order, Product), proving requests are actually being spread
+ * across the whole system rather than one route. Values come from the
+ * per-service upstream counter (gateway_upstream_requests_total), summed
+ * across every instance of each service.
  */
 export function TrafficDistribution({ data, rangeLabel }: { data: DashboardData; rangeLabel: string }) {
-  const totals = data.orderInstanceTotals
-    .map((s) => ({ name: upstreamName(s.labels.upstream ?? ''), value: s.value }))
-    .filter((s) => s.name !== NA)
+  const labelByKey = new Map((data.topology?.services ?? []).map((s) => [s.key, s.label]))
+
+  const totals = data.serviceTotals
+    .map((s) => ({ name: labelByKey.get(s.labels.service ?? '') ?? s.labels.service ?? '', value: s.value }))
+    .filter((s) => s.name !== '' && s.name !== NA)
     .sort((a, b) => a.name.localeCompare(b.name))
 
   const grandTotal = totals.reduce((sum, s) => sum + s.value, 0)
@@ -28,12 +32,12 @@ export function TrafficDistribution({ data, rangeLabel }: { data: DashboardData;
       <div className="card-head">
         <div className="card-head-left">
           <h2>Traffic Distribution</h2>
-          <span className="pill pill-muted">Order Service</span>
+          <span className="pill pill-muted">All Services</span>
         </div>
       </div>
 
       {slices.length === 0 ? (
-        <p className="empty-note">No order-service traffic recorded yet — send requests to /api/orders</p>
+        <p className="empty-note">No traffic recorded yet — send requests to /api/users, /api/orders or /api/products</p>
       ) : (
         <div className="dist-body">
           <Donut
