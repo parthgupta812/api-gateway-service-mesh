@@ -13,6 +13,24 @@ COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install
 
 COPY frontend/. .
+
+# Render (and other Docker-based build platforms) pass service environment
+# variables to `docker build` as --build-arg, not as container env vars --
+# they're only visible inside the build if a matching ARG is declared
+# here. Vite's `npm run build` only inlines import.meta.env.VITE_* from
+# the process environment it runs in, so each ARG is re-exposed as an ENV
+# for that step. Left unset (e.g. local `docker compose build`), these
+# default to empty strings -- exactly the existing local behavior, since
+# QuickLinks.tsx already treats an empty value as "not configured" and
+# falls back to same-host-different-port URLs (or, for Grafana, a
+# disabled local-only link).
+ARG VITE_GATEWAY_PUBLIC_URL
+ARG VITE_PROMETHEUS_PUBLIC_URL
+ARG VITE_GRAFANA_PUBLIC_URL
+ENV VITE_GATEWAY_PUBLIC_URL=${VITE_GATEWAY_PUBLIC_URL}
+ENV VITE_PROMETHEUS_PUBLIC_URL=${VITE_PROMETHEUS_PUBLIC_URL}
+ENV VITE_GRAFANA_PUBLIC_URL=${VITE_GRAFANA_PUBLIC_URL}
+
 RUN npm run build
 
 # ---- serve stage ----
