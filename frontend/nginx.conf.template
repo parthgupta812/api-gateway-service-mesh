@@ -8,12 +8,24 @@
 # GATEWAY_UPSTREAM / PROMETHEUS_UPSTREAM hold a full scheme+host, e.g.:
 #   local:  http://gateway:8080        http://prometheus:9090
 #   public: https://<gateway-host>     https://<prometheus-host>
+# GATEWAY_UPSTREAM_HOST / PROMETHEUS_UPSTREAM_HOST hold just the bare
+# hostname (no scheme/port) of the same upstream, used for the outbound
+# Host header -- see note below.
 #
 # Because envsubst runs before nginx parses this file, proxy_pass below
 # always sees a plain literal URL (exactly as it did before templating
 # was introduced) -- nginx resolves it once at config load using the
 # container's normal DNS, so no extra resolver configuration is needed
 # either locally (Docker Compose's embedded DNS) or on Render (public DNS).
+#
+# The outbound Host header must match the upstream's own hostname, not
+# the browser's request Host ($host). On Render, multiple services sit
+# behind one shared edge that routes by Host header; forwarding the
+# dashboard's own Host to the gateway/Prometheus upstream would make
+# that edge route the proxied request back to the dashboard itself
+# (which then answers with its own SPA HTML instead of the intended
+# backend response). Docker Compose has no such shared edge, so this
+# only matters for the public deployment -- but is harmless either way.
 
 server {
     listen       80;
@@ -32,7 +44,7 @@ server {
         proxy_pass         ${PROMETHEUS_UPSTREAM}/;
         proxy_ssl_server_name on;
         proxy_http_version 1.1;
-        proxy_set_header   Host              $host;
+        proxy_set_header   Host              ${PROMETHEUS_UPSTREAM_HOST};
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
@@ -44,7 +56,7 @@ server {
         proxy_pass         ${GATEWAY_UPSTREAM}/;
         proxy_ssl_server_name on;
         proxy_http_version 1.1;
-        proxy_set_header   Host              $host;
+        proxy_set_header   Host              ${GATEWAY_UPSTREAM_HOST};
         proxy_set_header   X-Real-IP         $remote_addr;
         proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;

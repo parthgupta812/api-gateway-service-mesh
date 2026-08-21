@@ -29,6 +29,11 @@ FROM nginx:1.27-alpine
 # so `docker compose up` needs no changes.
 ENV GATEWAY_UPSTREAM=http://gateway:8080
 ENV PROMETHEUS_UPSTREAM=http://prometheus:9090
+# Bare hostnames (no scheme/port) matching the upstreams above, used for
+# the outbound Host header nginx sends to each upstream (see
+# nginx.conf.template for why this must not be the browser's own Host).
+ENV GATEWAY_UPSTREAM_HOST=gateway
+ENV PROMETHEUS_UPSTREAM_HOST=prometheus
 
 COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=builder /app/dist /usr/share/nginx/html
